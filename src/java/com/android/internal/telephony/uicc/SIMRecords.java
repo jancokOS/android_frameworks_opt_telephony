@@ -32,6 +32,8 @@ import android.text.TextUtils;
 import android.telephony.Rlog;
 import android.telephony.SubscriptionManager;
 import android.content.res.Resources;
+import android.telephony.SubscriptionManager;
+import android.text.TextUtils;
 
 import com.android.internal.telephony.CommandsInterface;
 import com.android.internal.telephony.MccTable;
@@ -181,8 +183,6 @@ public class SIMRecords extends IccRecords {
     private static final int SYSTEM_EVENT_BASE = 0x100;
     private static final int EVENT_CARRIER_CONFIG_CHANGED = 1 + SYSTEM_EVENT_BASE;
     private static final int EVENT_APP_LOCKED = 2 + SYSTEM_EVENT_BASE;
-    private static final int EVENT_SIM_REFRESH = 3 + SYSTEM_EVENT_BASE;
-
 
     // Lookup table for carriers known to produce SIMs which incorrectly indicate MNC length.
 

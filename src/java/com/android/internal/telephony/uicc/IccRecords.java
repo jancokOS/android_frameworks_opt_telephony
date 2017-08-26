@@ -115,8 +115,10 @@ public abstract class IccRecords extends Handler implements IccConstants {
     public static final int EVENT_CFI = 1; // Call Forwarding indication
     public static final int EVENT_SPN = 2; // Service Provider Name
 
+    private static final int SYSTEM_EVENT_BASE = 0x100;
+    public static final int EVENT_REFRESH = 3 + SYSTEM_EVENT_BASE; // ICC refresh occurred
+
     public static final int EVENT_GET_ICC_RECORD_DONE = 100;
-    public static final int EVENT_REFRESH = 31; // ICC refresh occurred
     protected static final int EVENT_APP_READY = 1;
     private static final int EVENT_AKA_AUTHENTICATE_DONE          = 90;
     protected static final int EVENT_GET_SMS_RECORD_SIZE_DONE = 28;

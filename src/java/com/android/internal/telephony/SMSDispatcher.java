@@ -37,6 +37,7 @@ import android.os.AsyncResult;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.Message;
+import android.os.PersistableBundle;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.UserHandle;
@@ -47,6 +48,7 @@ import android.service.carrier.CarrierMessagingService;
 import android.service.carrier.ICarrierMessagingCallback;
 import android.service.carrier.ICarrierMessagingService;
 import android.telephony.CarrierMessagingServiceManager;
+import android.telephony.CarrierConfigManager;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.Rlog;
 import android.telephony.ServiceState;
@@ -67,6 +69,7 @@ import android.widget.TextView;
 
 import com.android.internal.R;
 import com.android.internal.telephony.GsmAlphabet.TextEncodingDetails;
+import com.android.internal.telephony.SmsUsageMonitor.SmsAuthorizationCallback;
 import com.android.internal.telephony.uicc.UiccCard;
 import com.android.internal.telephony.uicc.UiccController;
 
@@ -749,7 +752,8 @@ public abstract class SMSDispatcher extends Handler {
      *  raw pdu of the status report is in the extended data ("pdu").
      */
     protected abstract void sendData(String destAddr, String scAddr, int destPort,
-            byte[] data, PendingIntent sentIntent, PendingIntent deliveryIntent);
+            byte[] data, PendingIntent sentIntent, PendingIntent deliveryIntent,
+            String callingPackage);
 
     /**
      * Send a text based SMS.
@@ -929,8 +933,8 @@ public abstract class SMSDispatcher extends Handler {
             trackers[i] =
                 getNewSubmitPduTracker(destAddr, scAddr, parts.get(i), smsHeader, encoding,
                         sentIntent, deliveryIntent, (i == (msgCount - 1)), priority, isExpectMore,
-                        validityPeriod, unsentPartCount, anyPartFailed, messageUri,
-                        fullMessageText);
+                        validityPeriod, unsentPartCount, anyPartFailed,
+                        messageUri, fullMessageText, callingPkg);
             trackers[i].mPersistMessage = persistMessage;
         }
 
@@ -962,10 +966,10 @@ public abstract class SMSDispatcher extends Handler {
      */
     protected abstract SmsTracker getNewSubmitPduTracker(String destinationAddress,
             String scAddress, String message, SmsHeader smsHeader, int encoding,
-            PendingIntent sentIntent, PendingIntent deliveryIntent, boolean lastPart,
-            int priority, boolean isExpectMore, int validityPeriod,
-            AtomicInteger unsentPartCount, AtomicBoolean anyPartFailed,
-            Uri messageUri, String fullMessageText);
+            PendingIntent sentIntent, PendingIntent deliveryIntent, boolean lastPart, int priority,
+            boolean isExpectMore, int validityPeriod, AtomicInteger unsentPartCount,
+            AtomicBoolean anyPartFailed, Uri messageUri, String fullMessageText,
+            String callingPackage);
 
     /**
      * Send an SMS
@@ -1037,7 +1041,23 @@ public abstract class SMSDispatcher extends Handler {
                 return;
             }
 
-            sendSms(tracker);
+            if (mUsageMonitor.isSmsAuthorizationEnabled()) {
+                final SmsAuthorizationCallback callback = new SmsAuthorizationCallback() {
+                    @Override
+                    public void onAuthorizationResult(final boolean accepted) {
+                        if (accepted) {
+                            sendSms(tracker);
+                        } else {
+                            tracker.onFailed(mContext, RESULT_ERROR_GENERIC_FAILURE,
+                                    SmsUsageMonitor.ERROR_CODE_BLOCKED);
+                        }
+                    }
+                };
+                mUsageMonitor.authorizeOutgoingSms(tracker.mAppInfo, tracker.mDestAddress,
+                        tracker.mFullMessageText, callback, this);
+            } else {
+                sendSms(tracker);
+            }
         }
 
         if (PhoneNumberUtils.isLocalEmergencyNumber(mContext, tracker.mDestAddress)) {
@@ -1652,17 +1672,22 @@ public abstract class SMSDispatcher extends Handler {
             PendingIntent deliveryIntent, String format, AtomicInteger unsentPartCount,
             AtomicBoolean anyPartFailed, Uri messageUri, SmsHeader smsHeader,
             boolean isExpectMore, String fullMessageText, boolean isText, int validityPeriod,
-            boolean persistMessage) {
+            boolean persistMessage, String callingPackage) {
+
         // Get calling app package name via UID from Binder call
         PackageManager pm = mContext.getPackageManager();
-        String[] packageNames = pm.getPackagesForUid(Binder.getCallingUid());
+        String callerPackageName = callingPackage;
+        if(callerPackageName == null) {
+            String[] packageNames = pm.getPackagesForUid(Binder.getCallingUid());
+            callerPackageName = packageNames[0];
+        }
 
         // Get package info via packagemanager
         PackageInfo appInfo = null;
-        if (packageNames != null && packageNames.length > 0) {
+        if (callerPackageName != null) {
             try {
                 // XXX this is lossy- apps can share a UID
-                appInfo = pm.getPackageInfo(packageNames[0], PackageManager.GET_SIGNATURES);
+                appInfo = pm.getPackageInfo(callerPackageName, PackageManager.GET_SIGNATURES);
             } catch (PackageManager.NameNotFoundException e) {
                 // error will be logged in sendRawPdu
             }
@@ -1676,19 +1701,21 @@ public abstract class SMSDispatcher extends Handler {
     }
 
     protected SmsTracker getSmsTracker(HashMap<String, Object> data, PendingIntent sentIntent,
-            PendingIntent deliveryIntent, String format, Uri messageUri, boolean isExpectMore,
-            String fullMessageText, boolean isText, boolean persistMessage) {
+            PendingIntent deliveryIntent, String format, Uri messageUri,
+            boolean isExpectMore, String fullMessageText, boolean isText,
+            boolean persistMessage, String callingPackage) {
         return getSmsTracker(data, sentIntent, deliveryIntent, format, null/*unsentPartCount*/,
-                null/*anyPartFailed*/, messageUri, null/*smsHeader*/, isExpectMore,
-                fullMessageText, isText, -1, persistMessage);
+                null/*anyPartFailed*/, messageUri, null/*smsHeader*/,
+                isExpectMore, fullMessageText, isText, -1, persistMessage, callingPackage);
     }
 
     protected SmsTracker getSmsTracker(HashMap<String, Object> data, PendingIntent sentIntent,
-            PendingIntent deliveryIntent, String format, Uri messageUri, boolean isExpectMore,
-            String fullMessageText, boolean isText, int validityPeriod, boolean persistMessage) {
+            PendingIntent deliveryIntent, String format, Uri messageUri,
+            boolean isExpectMore, String fullMessageText, boolean isText,
+            int validityPeriod, boolean persistMessage, String callingPackage ) {
         return getSmsTracker(data, sentIntent, deliveryIntent, format, null/*unsentPartCount*/,
-                null/*anyPartFailed*/, messageUri, null/*smsHeader*/, isExpectMore, fullMessageText,
-                isText, validityPeriod, persistMessage);
+                null/*anyPartFailed*/, messageUri, null/*smsHeader*/, isExpectMore,
+                fullMessageText, isText, validityPeriod, persistMessage, callingPackage);
     }
 
     protected HashMap<String, Object> getSmsTrackerMap(String destAddr, String scAddr,
@@ -1858,5 +1885,19 @@ public abstract class SMSDispatcher extends Handler {
         } catch (PackageManager.NameNotFoundException re) {
             throw new SecurityException("Caller is not phone or carrier app!");
         }
+    }
+
+    protected boolean isRetryAlwaysOverIMS() {
+        CarrierConfigManager configManager = (CarrierConfigManager) mPhone.getContext()
+                .getSystemService(Context.CARRIER_CONFIG_SERVICE);
+        PersistableBundle b = null;
+        boolean retryAlwaysOverIMS = false;
+        if (configManager != null) {
+            b = configManager.getConfigForSubId(getSubId());
+        }
+        if (b != null) {
+            retryAlwaysOverIMS = b.getBoolean("config_retry_sms_over_ims", false);
+        }
+        return retryAlwaysOverIMS;
     }
 }

@@ -1640,6 +1640,12 @@ public class GsmCdmaPhone extends Phone {
         return (action == CF_ACTION_ENABLE) || (action == CF_ACTION_REGISTRATION);
     }
 
+    private boolean isImsUtEnabledOverCdma() {
+        return isPhoneTypeCdmaLte()
+            && mImsPhone != null
+            && mImsPhone.isUtEnabled();
+    }
+
     @Override
     public void getCallForwardingOption(int commandInterfaceCFReason, Message onComplete) {
         getCallForwardingOption(commandInterfaceCFReason,
@@ -1649,7 +1655,7 @@ public class GsmCdmaPhone extends Phone {
     @Override
     public void getCallForwardingOption(int commandInterfaceCFReason,
             int commandInterfaceServiceClass, Message onComplete) {
-        if (isPhoneTypeGsm()) {
+        if (isPhoneTypeGsm() || isImsUtEnabledOverCdma()) {
             Phone imsPhone = mImsPhone;
             if ((imsPhone != null)
                 && ((imsPhone.getServiceState().getState() == ServiceState.STATE_IN_SERVICE)
@@ -1672,7 +1678,7 @@ public class GsmCdmaPhone extends Phone {
                         commandInterfaceServiceClass, null, resp);
             }
         } else {
-            loge("getCallForwardingOption: not possible in CDMA");
+            loge("getCallForwardingOption: not possible in CDMA without IMS");
         }
     }
 
@@ -1696,7 +1702,7 @@ public class GsmCdmaPhone extends Phone {
             int commandInterfaceServiceClass,
             int timerSeconds,
             Message onComplete) {
-        if (isPhoneTypeGsm()) {
+        if (isPhoneTypeGsm() || isImsUtEnabledOverCdma()) {
             Phone imsPhone = mImsPhone;
             if ((imsPhone != null)
                     && ((imsPhone.getServiceState().getState() == ServiceState.STATE_IN_SERVICE)
@@ -1726,7 +1732,7 @@ public class GsmCdmaPhone extends Phone {
                         resp);
             }
         } else {
-            loge("setCallForwardingOption: not possible in CDMA");
+            loge("setCallForwardingOption: not possible in CDMA without IMS");
         }
     }
 
@@ -2114,7 +2120,7 @@ public class GsmCdmaPhone extends Phone {
 
             case EVENT_RUIM_RECORDS_LOADED:
                 logd("Event EVENT_RUIM_RECORDS_LOADED Received");
-                updateCurrentCarrierInProvider();
+                updateDataConnectionTracker();
                 break;
 
             case EVENT_RADIO_ON:
@@ -2513,6 +2519,11 @@ public class GsmCdmaPhone extends Phone {
                 mIccPhoneBookIntManager.updateIccRecords(mIccRecords.get());
             }
         }
+    }
+
+    @Override
+    public SIMRecords getSIMRecords() {
+        return mSimRecords;
     }
 
     private void processIccRecordEvents(int eventCode) {

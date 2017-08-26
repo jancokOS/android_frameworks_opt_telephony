@@ -147,6 +147,8 @@ public class ServiceStateTracker extends Handler {
      */
     private boolean mDontPollSignalStrength = false;
 
+    private boolean mIsModemTriggeredPollingPending = false;
+
     private RegistrantList mVoiceRoamingOnRegistrants = new RegistrantList();
     private RegistrantList mVoiceRoamingOffRegistrants = new RegistrantList();
     private RegistrantList mDataRoamingOnRegistrants = new RegistrantList();
@@ -2479,7 +2481,7 @@ public class ServiceStateTracker extends Handler {
      */
     public boolean isConcurrentVoiceAndDataAllowed() {
         if (mPhone.isPhoneTypeGsm()) {
-            if (mSS.getRilVoiceRadioTechnology() >= ServiceState.RIL_RADIO_TECHNOLOGY_UMTS) {
+            if (mSS.getRilDataRadioTechnology() >= ServiceState.RIL_RADIO_TECHNOLOGY_UMTS) {
                 return true;
             } else {
                 return mSS.getCssIndicator() == 1;
@@ -2565,13 +2567,15 @@ public class ServiceStateTracker extends Handler {
                 // don't poll for state when the radio is off
                 // EXCEPT, if the poll was modemTrigged (they sent us new radio data)
                 // or we're on IWLAN
-                if (!modemTriggered && ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN
-                        != mSS.getRilDataRadioTechnology()) {
+                if (!modemTriggered && !mIsModemTriggeredPollingPending &&
+                        ServiceState.RIL_RADIO_TECHNOLOGY_IWLAN !=
+                        mSS.getRilDataRadioTechnology()) {
                     pollStateDone();
                     break;
                 }
 
             default:
+                if (modemTriggered) mIsModemTriggeredPollingPending = true;
                 // Issue all poll-related commands at once then count down the responses, which
                 // are allowed to arrive out-of-order
                 mPollingContext[0]++;
@@ -2595,6 +2599,7 @@ public class ServiceStateTracker extends Handler {
 
     //todo: try to merge pollstate functions
     private void pollStateDone() {
+        mIsModemTriggeredPollingPending = false;
         if (mPhone.isPhoneTypeGsm()) {
             pollStateDoneGsm();
         } else if (mPhone.isPhoneTypeCdma()) {
@@ -3355,7 +3360,8 @@ public class ServiceStateTracker extends Handler {
             if (!hasBrandOverride && (mCi.getRadioState().isOn()) && (mPhone.isEriFileLoaded()) &&
                     (!ServiceState.isLte(mSS.getRilVoiceRadioTechnology()) ||
                             mPhone.getContext().getResources().getBoolean(com.android.internal.R.
-                                    bool.config_LTE_eri_for_network_name))) {
+                                    bool.config_LTE_eri_for_network_name)) &&
+                                    (!mIsSubscriptionFromRuim)) {
                 // Only when CDMA is in service, ERI will take effect
                 String eriText = mSS.getOperatorAlphaLong();
                 // Now the Phone sees the new ServiceState so it can get the new ERI text
@@ -3430,11 +3436,10 @@ public class ServiceStateTracker extends Handler {
         String idd = mHbpcdUtils.getIddByMcc(
                 Integer.parseInt(operatorNumeric.substring(0,3)));
         if (idd != null && !idd.isEmpty()) {
-            mPhone.setSystemProperty(TelephonyProperties.PROPERTY_OPERATOR_IDP_STRING,
-                    idd);
+            SystemProperties.set(TelephonyProperties.PROPERTY_OPERATOR_IDP_STRING, idd);
         } else {
             // use default "+", since we don't know the current IDP
-            mPhone.setSystemProperty(TelephonyProperties.PROPERTY_OPERATOR_IDP_STRING, "+");
+            SystemProperties.set(TelephonyProperties.PROPERTY_OPERATOR_IDP_STRING, "+");
         }
     }
 
@@ -3670,7 +3675,8 @@ public class ServiceStateTracker extends Handler {
      */
     private boolean isOperatorConsideredNonRoaming(ServiceState s) {
         String operatorNumeric = s.getOperatorNumeric();
-        String[] numericArray = mPhone.getContext().getResources().getStringArray(
+        String[] numericArray = SubscriptionManager.getResourcesForSubId(
+                mPhone.getContext(), mPhone.getSubId()).getStringArray(
                 com.android.internal.R.array.config_operatorConsideredNonRoaming);
 
         if (numericArray.length == 0 || operatorNumeric == null) {
@@ -3687,7 +3693,8 @@ public class ServiceStateTracker extends Handler {
 
     private boolean isOperatorConsideredRoaming(ServiceState s) {
         String operatorNumeric = s.getOperatorNumeric();
-        String[] numericArray = mPhone.getContext().getResources().getStringArray(
+        String[] numericArray = SubscriptionManager.getResourcesForSubId(
+                mPhone.getContext(), mPhone.getSubId()).getStringArray(
                 com.android.internal.R.array.config_sameNamedOperatorConsideredRoaming);
 
         if (numericArray.length == 0 || operatorNumeric == null) {
